@@ -1,0 +1,13 @@
+{
+  "timestamp": "2025-09-21T15:25:20.012328",
+  "models_trained": [
+    "Naive",
+    "Moving_Average",
+    "Seasonal_Naive",
+    "Linear_Trend",
+    "Random_Forest",
+    "Exponential_Smoothing"
+  ],
+  "target_column": "sales",
+  "forecast_horizon": 30
+}

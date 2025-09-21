@@ -1,0 +1,39 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+env/
+venv/
+.venv/
+.retail-forecasting/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# VSCode / IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Data files (don’t push raw/processed data to GitHub)
+data/raw/
+data/processed/
+
+# Models (large binary files)
+models/*.pkl
+models/*.h5
+models/*.joblib
+
+# Logs
+*.log
+
+# Environment & dependencies
+*.env
+*.yml
+*.yaml

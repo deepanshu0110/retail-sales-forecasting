@@ -7,7 +7,7 @@ on:
     branches: [ main, master ]
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,4 +31,4 @@ jobs:
       - name: Run tests
         run: |
           pip install pytest
-          pytest tests/ -v --tb=short 2>/dev/null || echo "No tests yet — passing build"
+          pytest tests/ -v --tb=short 2>/dev/null || echo "No tests yet — add a tests/ directory to enable CI testing"

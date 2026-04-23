@@ -1,4 +1,6 @@
 # Retail Sales Forecasting
+[![CI](https://github.com/deepanshu0110/retail-sales-forecasting/actions/workflows/ci.yml/badge.svg)](https://github.com/deepanshu0110/retail-sales-forecasting/actions)
+
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue?style=flat-square&logo=python)
 ![Scikit-learn](https://img.shields.io/badge/Scikit--learn-1.0+-orange?style=flat-square)

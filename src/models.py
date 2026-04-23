@@ -347,6 +347,45 @@ class ForecastingPipeline:
         except Exception as e:
             print(f"❌ Exponential smoothing model failed: {str(e)}")
     
+    def prophet_model(self):
+        """Facebook Prophet — handles seasonality and trend changes automatically."""
+        print("\n🔮 TRAINING PROPHET MODEL")
+        print("=" * 35)
+        try:
+            from prophet import Prophet
+            df_train = self.train_data[["date", self.target_col]].rename(
+                columns={"date": "ds", self.target_col: "y"}
+            )
+            df_train["ds"] = pd.to_datetime(df_train["ds"])
+            model = Prophet(
+                yearly_seasonality=True,
+                weekly_seasonality=True,
+                daily_seasonality=False,
+                interval_width=0.95,
+                changepoint_prior_scale=0.05,
+            )
+            model.fit(df_train)
+            n_test = len(self.test_data)
+            future = model.make_future_dataframe(periods=n_test, freq="D")
+            forecast_df = model.predict(future)
+            prophet_forecast = forecast_df.tail(n_test)["yhat"].values
+            prophet_lower   = forecast_df.tail(n_test)["yhat_lower"].values
+            prophet_upper   = forecast_df.tail(n_test)["yhat_upper"].values
+            prophet_metrics = self.calculate_metrics(self.actual_values, prophet_forecast, "Prophet")
+            self.models["Prophet"] = {
+                "model": model,
+                "forecast": prophet_forecast,
+                "lower": prophet_lower,
+                "upper": prophet_upper,
+                "metrics": prophet_metrics,
+                "description": "Facebook Prophet with weekly + yearly seasonality",
+            }
+            print("✅ Prophet model trained successfully!")
+        except ImportError:
+            print("⚠️  Prophet not installed. Run: pip install prophet")
+        except Exception as e:
+            print(f"❌ Prophet failed: {e}")
+
     def compare_models(self):
         """Compare all trained models"""
         print("\n🏆 MODEL PERFORMANCE COMPARISON")
@@ -607,6 +646,7 @@ class ForecastingPipeline:
         self.linear_trend_model()
         self.random_forest_model()
         self.exponential_smoothing_model()
+        self.prophet_model()
         
         # Compare and analyze
         print("\n📊 Analyzing Results...")

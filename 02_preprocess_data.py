@@ -90,3 +90,5 @@ def main():
 
 if __name__ == "__main__":
     processed_data = main()
+    if processed_data is None:
+        raise SystemExit(1)

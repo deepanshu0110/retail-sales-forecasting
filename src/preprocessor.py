@@ -42,7 +42,7 @@ class SalesPreprocessor:
         for store_id in cleaned_data['store_id'].unique():
             store_mask = cleaned_data['store_id'] == store_id
             cleaned_data.loc[store_mask, 'sales'] = (
-                cleaned_data.loc[store_mask, 'sales'].fillna(method='ffill')
+                cleaned_data.loc[store_mask, 'sales'].ffill()
             )
         
         # Fill remaining missing values with store averages
@@ -161,25 +161,28 @@ class SalesPreprocessor:
         for store_id in featured_data['store_id'].unique():
             store_mask = featured_data['store_id'] == store_id
             store_data = featured_data[store_mask].copy().sort_values('date')
+            # Shift by one day so each row only summarises *previous* days.
+            # Without this, the rolling stats include the same day's sales (target leakage).
+            past_sales = store_data['sales'].shift(1)
             
             for window in ROLLING_WINDOWS:
                 # Rolling statistics for sales
                 featured_data.loc[store_mask, f'sales_rolling_mean_{window}'] = (
-                    store_data['sales'].rolling(window=window, min_periods=1).mean()
+                    past_sales.rolling(window=window, min_periods=1).mean()
                 )
                 featured_data.loc[store_mask, f'sales_rolling_std_{window}'] = (
-                    store_data['sales'].rolling(window=window, min_periods=1).std()
+                    past_sales.rolling(window=window, min_periods=1).std()
                 )
                 featured_data.loc[store_mask, f'sales_rolling_min_{window}'] = (
-                    store_data['sales'].rolling(window=window, min_periods=1).min()
+                    past_sales.rolling(window=window, min_periods=1).min()
                 )
                 featured_data.loc[store_mask, f'sales_rolling_max_{window}'] = (
-                    store_data['sales'].rolling(window=window, min_periods=1).max()
+                    past_sales.rolling(window=window, min_periods=1).max()
                 )
                 
                 # Rolling sum for promotions (how many promotions in window)
                 featured_data.loc[store_mask, f'promotion_rolling_sum_{window}'] = (
-                    store_data['promotion'].rolling(window=window, min_periods=1).sum()
+                    store_data['promotion'].shift(1).rolling(window=window, min_periods=1).sum()
                 )
         
         rolling_cols_created = len([col for col in featured_data.columns if 'rolling' in col])
@@ -214,7 +217,12 @@ class SalesPreprocessor:
         return featured_data
     
     def create_target_encoding_features(self, data):
-        """Step 6: Create target encoding features"""
+        """Step 6: Create target encoding features
+
+        Note: these averages use the whole dataset, including the test period, so they
+        are kept for EDA only. The forecasting models do not use them (see
+        src/forecast_features.py for the leakage-free feature set).
+        """
         print("\n🎯 STEP 6: TARGET ENCODING FEATURES")
         print("=" * 38)
         

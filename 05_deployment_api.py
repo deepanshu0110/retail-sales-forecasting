@@ -195,27 +195,54 @@ def list_models():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ------------------ FIXED: use DataFrame to preserve feature names ------------------
-def generate_model_forecast(model_data, store_id, days_ahead):
-    """Generate forecast using a trained model, preserving feature names to avoid sklearn warnings"""
+# ------------------ Model forecast: builds real features for each future day ------------------
+def store_history(store_id):
+    """Daily sales history for one store, indexed by date."""
+    if sample_data is None or not {'store_id', 'sales', 'date'}.issubset(sample_data.columns):
+        return None
+    store_data = sample_data[sample_data['store_id'] == store_id].sort_values('date')
+    if store_data.empty:
+        return None
+    return pd.Series(store_data['sales'].values, index=pd.to_datetime(store_data['date']))
+
+
+def future_dates(store_id, days_ahead):
+    """Forecast the days right after the last observed date in the data."""
+    history = store_history(store_id)
+    last = history.index.max() if history is not None else pd.Timestamp(datetime.now().date())
+    return [last + pd.Timedelta(days=i + 1) for i in range(days_ahead)]
+
+
+def generate_model_forecast(model_data, store_id, days_ahead, promotions=None):
+    """Forecast each future day from features known in advance (no repeated rows)."""
     try:
+        from src.forecast_features import build_features
         model = model_data['model']
         features = model_data.get('features', [])
-
-        if sample_data is not None and 'store_id' in sample_data.columns:
-            store_data = sample_data[sample_data['store_id'] == store_id].tail(30)
-            if len(store_data) > 0 and features:
-                available_features = [f for f in features if f in store_data.columns]
-                if not available_features:
-                    return None
-                recent_row = store_data[available_features].iloc[-1:].copy()   # 1-row DataFrame with column names
-                forecast_df = pd.concat([recent_row] * days_ahead, ignore_index=True)  # repeat for horizon
-                forecast_values = model.predict(forecast_df)  # keeps feature names, no warning
-                return forecast_values.tolist()
-        return None
+        history = store_history(store_id)
+        if history is None or not features:
+            return None
+        start_date = model_data.get('start_date') or history.index.min()
+        dates = future_dates(store_id, days_ahead)
+        promo_lookup = {d: (promotions[i] if promotions and i < len(promotions) else 0)
+                        for i, d in enumerate(dates)}
+        X = build_features(dates, history, start_date, promo_lookup)
+        missing = [f for f in features if f not in X.columns]
+        if missing or X[features].isnull().any().any():
+            logger.warning(f"Cannot build features {missing or 'with full history'}")
+            return None
+        return [round(float(v), 2) for v in model.predict(X[features])]
     except Exception as e:
         logger.warning(f"Model forecast generation failed: {str(e)}")
         return None
+
+
+def find_model(name):
+    """Case-insensitive model lookup ('Random_Forest' == 'random_forest')."""
+    for key in loaded_models:
+        if key.lower() == str(name).lower():
+            return key
+    return None
 # ------------------------------------------------------------------------------------
 
 @app.route('/forecast', methods=['POST'])
@@ -228,18 +255,18 @@ def forecast():
         store_id = data.get('store_id', 1)
         days_ahead = data.get('days_ahead', 7)
         requested_model = data.get('model', 'best')
+        promotions = data.get('promotions')  # optional list of 0/1 planned promotions per day
 
         if not isinstance(days_ahead, int) or days_ahead < 1 or days_ahead > 90:
             return jsonify({'error': 'days_ahead must be between 1 and 90'}), 400
         if not isinstance(store_id, int) or store_id < 1:
             return jsonify({'error': 'store_id must be a positive integer'}), 400
 
-        start_date = datetime.now() + timedelta(days=1)
-        forecast_dates = [(start_date + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(days_ahead)]
+        forecast_dates = [d.strftime('%Y-%m-%d') for d in future_dates(store_id, days_ahead)]
 
         model_used = 'fallback'
         forecast_values = None
-        confidence_interval = '80%'
+        confidence_interval = 'not computed'
 
         if loaded_models and requested_model != 'fallback':
             try:
@@ -252,20 +279,17 @@ def forecast():
                     if best_model_name and 'model' in loaded_models[best_model_name]:
                         model_to_use = loaded_models[best_model_name]
                         model_used = best_model_name
-                        forecast_values = generate_model_forecast(model_to_use, store_id, days_ahead)
-                        confidence_interval = '85%'
-                elif requested_model in loaded_models and 'model' in loaded_models[requested_model]:
-                    model_to_use = loaded_models[requested_model]
-                    model_used = requested_model
-                    forecast_values = generate_model_forecast(model_to_use, store_id, days_ahead)
-                    confidence_interval = '85%'
+                        forecast_values = generate_model_forecast(model_to_use, store_id, days_ahead, promotions)
+                elif find_model(requested_model) and 'model' in loaded_models[find_model(requested_model)]:
+                    model_used = find_model(requested_model)
+                    model_to_use = loaded_models[model_used]
+                    forecast_values = generate_model_forecast(model_to_use, store_id, days_ahead, promotions)
             except Exception as e:
                 logger.warning(f"Model prediction failed: {str(e)}")
 
         if forecast_values is None:
             forecast_values = generate_fallback_forecast(store_id, days_ahead)
             model_used = 'fallback'
-            confidence_interval = '70%'
 
         if len(forecast_values) != days_ahead:
             forecast_values = (
@@ -344,8 +368,8 @@ def batch_forecast():
                             rmse = model_info.get('metrics', {}).get('RMSE', float('inf'))
                             if rmse < best_rmse and 'model' in model_info:
                                 best_rmse, model_data = rmse, model_info
-                    elif model in loaded_models and 'model' in loaded_models[model]:
-                        model_data = loaded_models[model]
+                    elif find_model(model) and 'model' in loaded_models[find_model(model)]:
+                        model_data = loaded_models[find_model(model)]
                     if model_data:
                         forecast_values = generate_model_forecast(model_data, store_id, days_ahead)
 
@@ -361,8 +385,7 @@ def batch_forecast():
             except Exception as e:
                 forecasts[f'store_{store_id}'] = {'error': str(e), 'forecast_values': None}
 
-        start_date = datetime.now() + timedelta(days=1)
-        forecast_dates = [(start_date + timedelta(days=i)).strftime('%Y-%m-%d') for i in range(days_ahead)]
+        forecast_dates = [d.strftime('%Y-%m-%d') for d in future_dates(store_ids[0], days_ahead)]
 
         return jsonify({
             'batch_forecast': True,

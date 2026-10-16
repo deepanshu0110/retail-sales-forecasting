@@ -200,9 +200,10 @@ class ForecastingPipeline:
             train_features = self.train_data.copy()
             test_features = self.test_data.copy()
             
-            # Create time index
-            train_features['time_idx'] = range(len(train_features))
-            test_features['time_idx'] = range(len(train_features), len(train_features) + len(test_features))
+            # Time index = days since the store's first date (same definition the API uses)
+            start_date = pd.to_datetime(train_features['date']).min()
+            train_features['time_idx'] = (pd.to_datetime(train_features['date']) - start_date).dt.days
+            test_features['time_idx'] = (pd.to_datetime(test_features['date']) - start_date).dt.days
             
             # Add basic features if available
             feature_cols = ['time_idx']
@@ -236,6 +237,7 @@ class ForecastingPipeline:
                 'forecast': trend_forecast,
                 'metrics': trend_metrics,
                 'features': feature_cols,
+                'start_date': str(start_date.date()),
                 'description': f'Linear regression with {len(feature_cols)} features'
             }
             
@@ -250,27 +252,28 @@ class ForecastingPipeline:
         print("=" * 40)
         
         try:
-            # Prepare features (exclude non-predictive columns)
-            exclude_cols = ['date', 'store_id', self.target_col]
-            feature_cols = [col for col in self.train_data.columns if col not in exclude_cols]
-            
-            if len(feature_cols) == 0:
-                print("❌ No features available for Random Forest")
-                return
-            
-            print(f"   Using {len(feature_cols)} features")
-            
-            # Prepare data
-            X_train = self.train_data[feature_cols].copy()
-            y_train = self.train_data[self.target_col]
-            X_test = self.test_data[feature_cols].copy()
-            
-            # Handle missing values
-            for col in feature_cols:
-                if X_train[col].isnull().sum() > 0:
-                    fill_value = X_train[col].median() if X_train[col].dtype in ['float64', 'int64'] else X_train[col].mode().iloc[0]
-                    X_train[col].fillna(fill_value, inplace=True)
-                    X_test[col].fillna(fill_value, inplace=True)
+            # Leakage-free features: only information known before each forecast day
+            # (calendar, holidays, planned promotions, sales on the same weekday a year earlier).
+            # Test-period features read history from the training period only.
+            from src.forecast_features import build_features, FEATURE_COLUMNS, YEAR_LAG
+            feature_cols = list(FEATURE_COLUMNS)
+            start_date = pd.to_datetime(self.train_data['date']).min()
+            train_sales = pd.Series(self.train_data[self.target_col].values,
+                                    index=pd.to_datetime(self.train_data['date']))
+            train_promos = pd.Series(self.train_data['promotion'].values,
+                                     index=pd.to_datetime(self.train_data['date']))
+            test_promos = pd.Series(self.test_data['promotion'].values,
+                                    index=pd.to_datetime(self.test_data['date']))
+
+            X_train = build_features(self.train_data['date'], train_sales, start_date, train_promos)
+            y_train = pd.Series(self.train_data[self.target_col].values, index=X_train.index)
+            has_lag = X_train[f'sales_lag_{YEAR_LAG}'].notna()
+            X_train, y_train = X_train[has_lag], y_train[has_lag]
+            X_test = build_features(self.test_data['date'], train_sales, start_date, test_promos)
+            if X_test.isnull().any().any():
+                raise ValueError("Test features need history beyond the training period")
+
+            print(f"   Using {len(feature_cols)} leakage-free features, {len(X_train)} training rows")
             
             # Train Random Forest
             model = RandomForestRegressor(
@@ -304,7 +307,9 @@ class ForecastingPipeline:
                 'metrics': rf_metrics,
                 'features': feature_cols,
                 'feature_importance': feature_importance,
-                'description': f'Random Forest with {len(feature_cols)} features'
+                'start_date': str(start_date.date()),
+                'feature_builder': 'src.forecast_features.build_features',
+                'description': f'Random Forest with {len(feature_cols)} leakage-free features'
             }
             
             print("✅ Random Forest model trained successfully!")
@@ -609,6 +614,8 @@ class ForecastingPipeline:
                             'model': model_info['model'],
                             'features': model_info.get('features', []),
                             'metrics': model_info['metrics'],
+                            'start_date': model_info.get('start_date'),
+                            'feature_builder': model_info.get('feature_builder'),
                             'description': model_info['description']
                         }, f)
                     

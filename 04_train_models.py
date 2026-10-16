@@ -121,12 +121,16 @@ def main():
             all_stores.update(store_results)
             
             for store_id, results in all_stores.items():
-                if results:
+                if results is not None:
                     if isinstance(results, dict):
                         print(f"   Store {store_id}: {results['best_model']} (MAPE: {results['mape']:.1f}%)")
                     else:
                         print(f"   Store {store_id}: {results['Model']} (MAPE: {results['MAPE']:.1f}%)")
         
+        # The extra stores above also call save_models(); re-save store 1 so the
+        # deployed models are the ones the README reports, not the last store trained.
+        pipeline.save_models()
+
         print(f"\n🎉 MODEL TRAINING COMPLETED!")
         print("=" * 35)
         print(f"📁 Results saved to: results/")
@@ -156,3 +160,5 @@ def main():
 
 if __name__ == "__main__":
     pipeline, comparison_df, report = main()
+    if pipeline is None:
+        raise SystemExit(1)

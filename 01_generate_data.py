@@ -53,3 +53,5 @@ def main():
 
 if __name__ == "__main__":
     data = main()
+    if data is None:
+        raise SystemExit(1)

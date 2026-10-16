@@ -99,3 +99,5 @@ def main():
 
 if __name__ == "__main__":
     report = main()
+    if report is None:
+        raise SystemExit(1)

@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue?style=flat-square&logo=python)
 ![Scikit-learn](https://img.shields.io/badge/Scikit--learn-1.0+-orange?style=flat-square)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green?style=flat-square&logo=fastapi)
+![Flask](https://img.shields.io/badge/Flask-API-green?style=flat-square&logo=flask)
 ![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)
 
 End-to-end retail demand forecasting system, from synthetic data to a production API. Compares six models and selects the best by MAPE.
@@ -53,14 +53,18 @@ python 05_deployment_api.py
 ## API Usage
 
 ```bash
-curl -X POST http://localhost:8000/forecast -H 'Content-Type: application/json' -d '{"store_id": 1, "horizon": 7}'
+curl -X POST http://localhost:5000/forecast -H 'Content-Type: application/json' -d '{"store_id": 1, "days_ahead": 7, "model": "best"}'
 ```
+
+The API is a Flask app on port 5000. Other endpoints: `GET /health`, `GET /models`, `POST /batch_forecast`.
+
+**Known issue: the Random Forest API forecast is flat.** `generate_model_forecast` repeats the last observed feature row for every future day, so all days get the same prediction. A proper multi-day forecast needs to build each future day's calendar features and roll the lag features forward. If a requested model name is not found, the API falls back to a seasonal average with random noise.
 
 ---
 
 ## Tech Stack
 
-Python · Pandas · NumPy · Scikit-learn · Statsmodels · FastAPI · Matplotlib
+Python · Pandas · NumPy · Scikit-learn · Statsmodels · Flask · Matplotlib
 
 ---
 
